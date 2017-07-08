@@ -243,7 +243,7 @@ pub struct PageMmapOptions<'a> {
 /// # use std::error::Error;
 ///
 /// # fn try_main() -> std::io::Result<()> {
-/// let mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+/// let mmap = unsafe { memmap::paged("Local\\mmap_page_paged", 25)
 ///                         .protection(memmap::Protection::Read)
 ///                         .map()? };
 /// assert_eq!([0, 0, 0], &mmap[0..3]);
@@ -270,7 +270,7 @@ impl<'a> PageMmapOptions<'a> {
     ///
     /// # fn try_main() -> std::io::Result<()> {
     ///
-    /// let mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+    /// let mmap = unsafe { memmap::paged("Local\\mmap_page_exclusive", 25)
     ///                         .exclusive()
     ///                         .map()? };
     /// # Ok(())
@@ -290,7 +290,7 @@ impl<'a> PageMmapOptions<'a> {
     ///
     /// # fn try_main() -> std::io::Result<()> {
     ///
-    /// let mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+    /// let mmap = unsafe { memmap::paged("Local\\mmap_page_protection", 25)
     ///                         .protection(memmap::Protection::Read)
     ///                         .map()? };
     /// # Ok(())
@@ -325,7 +325,7 @@ impl<'a> PageMmapOptions<'a> {
     /// ```rust
     /// # use std::error::Error;
     /// # fn try_main() -> std::io::Result<()> {
-    /// let mmap = unsafe { memmap::paged("Local\\mmap_file", 20)
+    /// let mmap = unsafe { memmap::paged("Local\\mmap_page_map", 20)
     ///                         .protection(memmap::Protection::Read)
     ///                         .map()? };
     /// println!("{}", mmap[0]);
@@ -365,7 +365,7 @@ impl<'a> PageMmapOptions<'a> {
     ///
     /// # use std::error::Error;
     /// # fn try_main() -> std::io::Result<()> {
-    /// let mut mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+    /// let mut mmap = unsafe { memmap::paged("Local\\mmap_page_map_mut", 25)
     ///                             .protection(memmap::Protection::ReadCopy)
     ///                             .map_mut()? };
     /// (&mut mmap[..]).write(b"Hello world");
