@@ -3,8 +3,10 @@ extern crate kernel32;
 extern crate winapi;
 
 use std::{io, mem, ptr};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::os::raw::c_void;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawHandle;
 
 use self::fs2::FileExt;
@@ -38,6 +40,7 @@ pub struct MmapInner {
     file: Option<File>,
     ptr: *mut c_void,
     len: usize,
+    handle: Option<winapi::HANDLE>,
 }
 
 impl MmapInner {
@@ -72,6 +75,7 @@ impl MmapInner {
                     file: Some(try!(file.duplicate())),
                     ptr: ptr.offset(alignment as isize),
                     len: len as usize,
+                    handle: None,
                 })
             }
         }
@@ -115,9 +119,50 @@ impl MmapInner {
                     file: None,
                     ptr: ptr,
                     len: len as usize,
+                    handle: None,
                 })
             } else {
                 Err(io::Error::last_os_error())
+            }
+        }
+    }
+
+    pub fn paged(len: usize, prot: Protection, name: &str, exclusive: bool) -> io::Result<MmapInner> {
+        unsafe {
+            let name = OsStr::new(name).encode_wide().chain(Some(0)).into_iter().collect::<Vec<_>>();
+
+            let mut handle = kernel32::CreateFileMappingW(winapi::INVALID_HANDLE_VALUE,
+                                                          ptr::null_mut(),
+                                                          prot.as_mapping_flag(),
+                                                          (len >> 16 >> 16) as winapi::DWORD,
+                                                          (len & 0xFFFFFFFF) as winapi::DWORD,
+                                                          name.as_ptr());
+
+            if handle == ptr::null_mut() {
+                let err = io::Error::last_os_error();
+
+                if !exclusive && err.raw_os_error().unwrap() == winapi::ERROR_ALREADY_EXISTS as i32 {
+                    handle = kernel32::OpenFileMappingW(prot.as_view_flag(), winapi::TRUE, name.as_ptr());
+
+                    if handle == ptr::null_mut() {
+                        return Err(io::Error::last_os_error());
+                    }
+                } else {
+                    return Err(err);
+                }
+            }
+
+            let ptr = kernel32::MapViewOfFile(handle, prot.as_view_flag(), 0, 0, len as winapi::SIZE_T);
+
+            if ptr == ptr::null_mut() {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(MmapInner{
+                    file: None,
+                    ptr: ptr,
+                    len: len as usize,
+                    handle: Some(handle),
+                })
             }
         }
     }
@@ -177,6 +222,11 @@ impl Drop for MmapInner {
             let ptr = self.ptr.offset(- (alignment as isize));
             assert!(kernel32::UnmapViewOfFile(ptr) != 0,
                     "unable to unmap mmap: {}", io::Error::last_os_error());
+            
+            if let Some(handle) = self.handle {
+                assert!(kernel32::CloseHandle(handle) != 0,
+                    "unable to close file handle: {}", io::Error::last_os_error());
+            }
         }
     }
 }
