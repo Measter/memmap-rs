@@ -121,7 +121,7 @@ impl MmapInner {
         // Create a shared memory object. By default this will create a new object if the specified
         // name does not already exist.
         let fd = unsafe {
-            libc::shm_open(CString::new(name.clone()).unwrap()).as_ptr(),
+            libc::shm_open(CString::new(name.clone()).unwrap().as_ptr(),
                            libc::O_CREAT
                            | if let Protection::Read = prot { libc::O_RDONLY } else { libc::O_RDWR }
                            | if exclusive { libc::O_EXCL } else { 0 },
