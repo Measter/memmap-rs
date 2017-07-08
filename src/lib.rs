@@ -213,6 +213,184 @@ impl AnonymousMmapOptions {
     }
 }
 
+// Page-backed mappings
+
+/// Options that can be used to configure how a file-backed mapping is created.
+///
+/// Create this structure by calling [`memmap::paged()`](fn.paged.html),
+/// then chain call methods to configure additional options, finally, call [`map()`](#method.map)
+/// or [`map_mut()`](#method.map_mut).
+#[derive(Copy, Clone, Debug)]
+pub struct PageMmapOptions<'a> {
+    name: &'a str,
+    protection: Option<Protection>,
+    len: usize,
+    is_exclusive: bool,
+}
+
+/// Configure a new page-backed mapping.
+///
+/// # Unsafety
+///
+/// This function is `unsafe`, because it's up to the caller to ensure
+/// that no other process or thread is accessing the same file concurrently.
+/// In particular, it is **undefined behavior** in Rust for the memory to be
+/// modified by some other code while there's a reference to it.
+///
+/// # Example
+///
+/// ```rust
+/// # use std::error::Error;
+///
+/// # fn try_main() -> std::io::Result<()> {
+/// let mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+///                         .protection(memmap::Protection::Read)
+///                         .map()? };
+/// assert_eq!([0, 0, 0], &mmap[0..3]);
+/// # Ok(())
+/// # }
+/// # fn main() { try_main().unwrap(); }
+/// ```
+pub unsafe fn paged(name: &str, len: usize) -> PageMmapOptions {
+    PageMmapOptions {
+        name: name,
+        protection: None,
+        len: len,
+        is_exclusive: false,
+    }
+}
+
+impl<'a> PageMmapOptions<'a> {
+    /// Configure this mapping to be exclusive.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::error::Error;
+    ///
+    /// # fn try_main() -> std::io::Result<()> {
+    ///
+    /// let mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+    ///                         .exclusive()
+    ///                         .map()? };
+    /// # Ok(())
+    /// # }
+    /// # fn main() { try_main().unwrap(); }
+    /// ```
+    pub fn exclusive(&mut self) -> &mut Self {
+        self.is_exclusive = true;
+        self
+    }
+    /// Set a protection to be used by this mapping.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::error::Error;
+    ///
+    /// # fn try_main() -> std::io::Result<()> {
+    ///
+    /// let mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+    ///                         .protection(memmap::Protection::Read)
+    ///                         .map()? };
+    /// # Ok(())
+    /// # }
+    /// # fn main() { try_main().unwrap(); }
+    /// ```
+    pub fn protection(&mut self, protection: Protection) -> &mut Self {
+        self.protection = Some(protection);
+        self
+    }
+
+    fn map_inner(&self) -> Result<MmapInner> {
+        let inner = try!(MmapInner::paged(self.len, self.protection.unwrap(), self.name, self.is_exclusive));
+        Ok(inner)
+    }
+
+    /// Actually map this mapping into the address space.
+    ///
+    /// This method returns an immutable mapping, see [`map_mut()`](#method.map_mut)
+    /// for a mutable version.
+    ///
+    /// If the protection has not been [set explicitly](#method.protection), this method
+    /// assumes [`Read`](enum.Protection.html#variant.Read).
+    ///
+    /// # Errors
+    ///
+    /// This method returns `Err` when the underlying system call fails, which can happen for
+    /// a variety of reasons, such as when you don't have the necessary permissions for the file.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::error::Error;
+    /// # fn try_main() -> std::io::Result<()> {
+    /// let mmap = unsafe { memmap::paged("Local\\mmap_file", 20)
+    ///                         .protection(memmap::Protection::Read)
+    ///                         .map()? };
+    /// println!("{}", mmap[0]);
+    /// # Ok(())
+    /// # }
+    /// # fn main() { try_main().unwrap(); }
+    /// ```
+    pub fn map(&self) -> Result<Mmap> {
+        let mut this = *self;
+        if this.protection.is_none() {
+            this.protection = Some(Protection::Read);
+        }
+        let inner = try!(this.map_inner());
+        Ok( Mmap { inner: inner } )
+    }
+
+    /// Actually map this mapping into the address space.
+    ///
+    /// This method returns a mutable mapping, see [`map()`](#method.map) for an immutable
+    /// version.
+    ///
+    /// If the protection has not been [set explicitly](#method.protection), this method
+    /// assumes [`ReadWrite`](enum.Protection.html#variant.ReadWrite).
+    ///
+    /// # Errors
+    ///
+    /// This method returns `Err` when the underlying system call fails, which can happen for
+    /// a variety of reasons, such as when you don't have the necessary permissions for the file.
+    ///
+    /// This method *also* returns `Err` with `ErrorKind` set to `InvalidInput` if the specified
+    /// protection does not allow the mapping to be mutable.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use std::io::Write;
+    ///
+    /// # use std::error::Error;
+    /// # fn try_main() -> std::io::Result<()> {
+    /// let mut mmap = unsafe { memmap::paged("Local\\mmap_file", 25)
+    ///                             .protection(memmap::Protection::ReadCopy)
+    ///                             .map_mut()? };
+    /// (&mut mmap[..]).write(b"Hello world");
+    /// # Ok(())
+    /// # }
+    /// # fn main() { try_main().unwrap(); }
+    /// ```
+    pub fn map_mut(&self) -> Result<MmapMut> {
+        let mut this = *self;
+        if this.protection.is_none() {
+            this.protection = Some(Protection::ReadWrite);
+        }
+        match this.protection.unwrap() {
+            Protection::Read | Protection::ReadExecute => Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Invalid protection for a mutable mapping",
+            )),
+            Protection::ReadWrite | Protection::ReadCopy => {
+                let inner = try!(this.map_inner());
+                Ok( MmapMut { inner: inner } )
+            }
+        }
+    }
+}
+
 // File-backed mappings
 
 /// Options that can be used to configure how a file-backed mapping is created.
@@ -345,7 +523,7 @@ impl<'a> FileMmapOptions<'a> {
             let l = try!(self.file.metadata()).len();
             if l > usize::MAX as u64 {
                 return Err(Error::new(ErrorKind::InvalidData,
-                      "file length overflows usize"));
+                    "file length overflows usize"));
             }
             len = l as usize - self.offset;
         }
@@ -903,6 +1081,61 @@ mod test {
 
         // read values back
         assert_eq!(&incr[..], &mmap[..]);
+    }
+
+    #[test]
+    fn map_named() {
+        let expected_len = 128;
+        let mut mmap = unsafe { memmap::paged("Local\\map_named_test", expected_len) }.map_mut().unwrap();
+        
+        let len = mmap.len();
+        assert_eq!(expected_len, len);
+
+        let zeros = vec![0; len];
+        let incr: Vec<u8> = (0..len as u8).collect();
+
+        // check that the mmap is empty
+        assert_eq!(&zeros[..], &mmap[..]);
+
+        // write values into the mmap
+        (&mut mmap[..]).write_all(&incr[..]).unwrap();
+
+        // read values back
+        assert_eq!(&incr[..], &mmap[..]);
+    }
+
+    #[test]
+    fn map_named_reopen() {
+        let expected_len = 128;
+
+        let make_map = || -> memmap::MmapMut {
+            unsafe { memmap::paged("Local\\map_named_reopen_test", expected_len) }.map_mut().unwrap()
+        };
+
+        let (mut mmap1, mmap2) = (make_map(), make_map());
+        
+        let len = mmap1.len();
+        assert_eq!(expected_len, len);
+        assert_eq!(expected_len, mmap2.len());
+
+        let zeros = vec![0; len];
+        let incr: Vec<u8> = (0..len as u8).collect();
+
+        // check that the maps are empty
+        assert_eq!(&zeros[..], &mmap1[..]);
+        assert_eq!(&zeros[..], &mmap2[..]);
+
+        // write values into mmap1
+        (&mut mmap1[..]).write_all(&incr[..]).unwrap();
+
+        // read values back from both maps
+        assert_eq!(&incr[..], &mmap1[..]);
+        assert_eq!(&incr[..], &mmap2[..]);
+
+        // create a third map to check that the values remain
+        let mmap3 = make_map();
+
+        assert_eq!(&incr[..], &mmap3[..]);
     }
 
     #[test]
